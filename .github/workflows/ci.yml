@@ -55,18 +55,23 @@ jobs:
       - name: Test installer, startup, and uninstall preservation
         shell: pwsh
         run: |
-          $historyDir = Join-Path $env:LOCALAPPDATA "FileForge"
+          $ErrorActionPreference = 'Stop'
+          $localAppData = [Environment]::GetFolderPath('LocalApplicationData')
+          $historyDir = Join-Path $localAppData "FileForge"
           New-Item -ItemType Directory -Force -Path $historyDir | Out-Null
           $historyFile = Join-Path $historyDir "history.json"
           Set-Content -Path $historyFile -Value '{"releaseVerification":true}'
-          Start-Process -FilePath dist/release/FileForge-Setup-1.0.0.exe -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait
-          $installedExe = Join-Path $env:LOCALAPPDATA "Programs\FileForge\FileForge.exe"
+          $installer = (Resolve-Path dist/release/FileForge-Setup-1.0.0.exe).Path
+          $installProcess = Start-Process -FilePath $installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait -PassThru
+          if ($installProcess.ExitCode -ne 0) { throw "Installer exited with $($installProcess.ExitCode)" }
+          $installedExe = Join-Path $localAppData "Programs\FileForge\FileForge.exe"
           if (-not (Test-Path $installedExe)) { throw "Installer did not create FileForge.exe" }
-          & $installedExe --version
-          if ($LASTEXITCODE -ne 0) { throw "Installed application smoke test failed" }
-          $uninstaller = Join-Path $env:LOCALAPPDATA "Programs\FileForge\unins000.exe"
+          $appProcess = Start-Process -FilePath $installedExe -ArgumentList '--version' -Wait -PassThru
+          if ($appProcess.ExitCode -ne 0) { throw "Installed application smoke test exited with $($appProcess.ExitCode)" }
+          $uninstaller = Join-Path $localAppData "Programs\FileForge\unins000.exe"
           if (-not (Test-Path $uninstaller)) { throw "Uninstaller was not created" }
-          Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait
+          $uninstallProcess = Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
+          if ($uninstallProcess.ExitCode -ne 0) { throw "Uninstaller exited with $($uninstallProcess.ExitCode)" }
           if (Test-Path $installedExe) { throw "Uninstall did not remove the application" }
           if (-not (Test-Path $historyFile)) { throw "Uninstall removed user history" }
       - name: Upload Windows release files
