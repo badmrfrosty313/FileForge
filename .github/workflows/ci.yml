@@ -12,15 +12,18 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.11'}
+      - name: Install Qt runtime dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libopengl0 libxkbcommon-x11-0 libxcb-cursor0
       - run: python -m pip install --upgrade pip
       - run: pip install -e '.[dev]'
       - run: ruff check .
-      - run: pytest -q --junitxml=test-results.xml
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: test-results-${{ matrix.os }}
-          path: test-results.xml
+      - name: Test
+        run: pytest -q --junitxml=test-results.xml
+        env:
+          QT_QPA_PLATFORM: offscreen
   package-windows:
     needs: test
     runs-on: windows-latest
@@ -31,5 +34,13 @@ jobs:
       - run: pip install '.[dev]'
       - run: pyinstaller --noconfirm --windowed --name FileForge fileforge/app.py
       - run: dist\\FileForge\\FileForge.exe --version
-      - uses: actions/upload-artifact@v4
-        with: {name: FileForge-Windows, path: dist/FileForge}
+      - name: Upload Windows bundle
+        id: windows_artifact
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: FileForge-Windows
+          path: dist/FileForge
+      - name: Explain artifact quota blocker
+        if: steps.windows_artifact.outcome == 'failure'
+        run: echo "::warning::The Windows binary built and passed its smoke test, but GitHub Actions artifact storage is full. Free artifact storage and rerun CI before publishing a release."
