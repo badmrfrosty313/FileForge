@@ -41,6 +41,14 @@ def is_within(path: Path, root: Path) -> bool:
         return False
 
 
+def is_link_like(path: Path) -> bool:
+    try:
+        attributes = getattr(path.lstat(), "st_file_attributes", 0)
+    except OSError:
+        return False
+    return path.is_symlink() or bool(attributes & 0x400)  # Windows reparse-point flag
+
+
 def validate_change(source: Path, destination: Path) -> list[str]:
     errors: list[str] = []
     reason = validate_filename(destination.name)
@@ -48,7 +56,7 @@ def validate_change(source: Path, destination: Path) -> list[str]:
         errors.append(reason)
     if source == destination:
         errors.append("Source and destination are identical.")
-    if source.is_symlink():
+    if is_link_like(source):
         errors.append("Symbolic links and junction-like entries are not changed.")
     if not destination.is_absolute():
         errors.append("Destination must be an absolute path.")

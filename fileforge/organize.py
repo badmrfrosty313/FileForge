@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .models import FileStamp, PlannedChange
-from .validation import is_within, validate_filename
+from .validation import is_link_like, is_within, validate_filename
 
 CATEGORIES = {
     "Images": {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp"},
@@ -32,7 +32,7 @@ def plan_organization(
     changes: list[PlannedChange] = []
     rules = {key.lower().lstrip("."): value for key, value in (custom_rules or {}).items()}
     for path in paths:
-        if not path.is_file() or path.is_symlink():
+        if not path.is_file() or is_link_like(path):
             continue
         extension = path.suffix.lower().lstrip(".")
         if mode == "category":
@@ -54,7 +54,7 @@ def plan_quarantine(paths: list[Path], root: Path) -> list[PlannedChange]:
     root = root.absolute()
     changes = []
     for path in paths:
-        if path.is_file() and not path.is_symlink():
+        if path.is_file() and not is_link_like(path):
             destination = root / path.name
             if not is_within(destination, root):
                 raise ValueError("Quarantine destination escaped the selected root.")

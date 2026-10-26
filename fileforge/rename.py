@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .models import FileStamp, PlannedChange
-from .validation import normalized, validate_change
+from .validation import is_link_like, normalized, validate_change
 
 
 @dataclass(frozen=True)
@@ -43,7 +43,7 @@ def plan_renames(paths: list[Path], rules: RenameRules) -> list[PlannedChange]:
         path
         for path in paths
         if path.is_file()
-        and not path.is_symlink()
+        and not is_link_like(path)
         and (not extension_filter or path.suffix.lower() == extension_filter)
     ]
     changes = []

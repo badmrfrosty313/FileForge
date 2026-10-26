@@ -8,6 +8,8 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from .validation import is_link_like
+
 
 @dataclass(frozen=True)
 class DuplicateGroup:
@@ -28,16 +30,16 @@ def scan_files(roots: Iterable[Path], cancel: threading.Event | None = None) -> 
             break
         path = pending.pop()
         try:
-            if path.is_symlink():
+            if is_link_like(path):
                 continue
             if path.is_file():
                 files.append(path)
                 continue
             with os.scandir(path) as entries:
                 for entry in entries:
-                    if entry.is_symlink():
-                        continue
                     candidate = Path(entry.path)
+                    if is_link_like(candidate):
+                        continue
                     if entry.is_dir(follow_symlinks=False):
                         pending.append(candidate)
                     elif entry.is_file(follow_symlinks=False):
@@ -69,7 +71,7 @@ def duplicate_groups(
     by_size: dict[int, list[Path]] = defaultdict(list)
     for path in paths:
         try:
-            if path.is_file() and not path.is_symlink():
+            if path.is_file() and not is_link_like(path):
                 by_size[path.stat().st_size].append(path)
         except (PermissionError, FileNotFoundError, OSError):
             continue
