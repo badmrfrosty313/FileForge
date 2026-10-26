@@ -1,0 +1,43 @@
+name: Publish release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  publish-windows-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: pip install '.[dev]'
+      - run: pyinstaller --noconfirm --windowed --icon installer\\FileForge.ico --name FileForge fileforge/app.py
+      - run: dist\\FileForge\\FileForge.exe --version
+      - run: choco install innosetup --no-progress --yes
+      - run: iscc installer\\FileForge.iss
+      - name: Create portable archive and checksums
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/release | Out-Null
+          Compress-Archive -Path dist/FileForge -DestinationPath dist/release/FileForge-Portable-1.0.0.zip -Force
+          Get-FileHash dist/release/FileForge-Setup-1.0.0.exe -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  FileForge-Setup-1.0.0.exe" } | Set-Content dist/release/SHA256SUMS.txt
+          Get-FileHash dist/release/FileForge-Portable-1.0.0.zip -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  FileForge-Portable-1.0.0.zip" } | Add-Content dist/release/SHA256SUMS.txt
+      - name: Verify release files
+        shell: pwsh
+        run: |
+          Expand-Archive -Path dist/release/FileForge-Portable-1.0.0.zip -DestinationPath portable-check -Force
+          if (-not (Test-Path portable-check/FileForge/FileForge.exe)) { throw "Portable archive is missing FileForge.exe" }
+          if (-not (Test-Path dist/release/FileForge-Setup-1.0.0.exe)) { throw "Installer was not produced" }
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: FileForge v1.0.0 | First Stable Release
+          body_path: docs/release-notes.md
+          files: |
+            dist/release/FileForge-Setup-1.0.0.exe
+            dist/release/FileForge-Portable-1.0.0.zip
+            dist/release/SHA256SUMS.txt

@@ -1,0 +1,81 @@
+name: CI
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Install Qt runtime dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libopengl0 libxkbcommon-x11-0 libxcb-cursor0
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e '.[dev]'
+      - run: ruff check .
+      - name: Test
+        run: pytest -q --junitxml=test-results.xml
+        env:
+          QT_QPA_PLATFORM: offscreen
+  package-windows:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: pip install '.[dev]'
+      - run: pyinstaller --noconfirm --windowed --icon installer\\FileForge.ico --name FileForge fileforge/app.py
+      - run: dist\\FileForge\\FileForge.exe --version
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress --yes
+      - name: Build installer
+        run: iscc installer\\FileForge.iss
+      - name: Create portable archive and checksums
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/release | Out-Null
+          Compress-Archive -Path dist/FileForge -DestinationPath dist/release/FileForge-Portable-1.0.0.zip -Force
+          Get-FileHash dist/release/FileForge-Setup-1.0.0.exe -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  FileForge-Setup-1.0.0.exe" } | Set-Content dist/release/SHA256SUMS.txt
+          Get-FileHash dist/release/FileForge-Portable-1.0.0.zip -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  FileForge-Portable-1.0.0.zip" } | Add-Content dist/release/SHA256SUMS.txt
+      - name: Verify installer and portable files
+        shell: pwsh
+        run: |
+          if (-not (Test-Path dist/release/FileForge-Setup-1.0.0.exe)) { throw "Installer was not produced" }
+          if (-not (Test-Path dist/release/FileForge-Portable-1.0.0.zip)) { throw "Portable archive was not produced" }
+          Expand-Archive -Path dist/release/FileForge-Portable-1.0.0.zip -DestinationPath portable-check -Force
+          if (-not (Test-Path portable-check/FileForge/FileForge.exe)) { throw "Portable archive is missing FileForge.exe" }
+      - name: Test installer, startup, and uninstall preservation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $localAppData = [Environment]::GetFolderPath('LocalApplicationData')
+          $historyDir = Join-Path $localAppData "FileForge"
+          New-Item -ItemType Directory -Force -Path $historyDir | Out-Null
+          $historyFile = Join-Path $historyDir "history.json"
+          Set-Content -Path $historyFile -Value '{"releaseVerification":true}'
+          $installer = (Resolve-Path dist/release/FileForge-Setup-1.0.0.exe).Path
+          $installProcess = Start-Process -FilePath $installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait -PassThru
+          if ($installProcess.ExitCode -ne 0) { throw "Installer exited with $($installProcess.ExitCode)" }
+          $installedExe = Join-Path $localAppData "Programs\FileForge\FileForge.exe"
+          if (-not (Test-Path $installedExe)) { throw "Installer did not create FileForge.exe" }
+          $appProcess = Start-Process -FilePath $installedExe -ArgumentList '--version' -Wait -PassThru
+          if ($appProcess.ExitCode -ne 0) { throw "Installed application smoke test exited with $($appProcess.ExitCode)" }
+          $uninstaller = Join-Path $localAppData "Programs\FileForge\unins000.exe"
+          if (-not (Test-Path $uninstaller)) { throw "Uninstaller was not created" }
+          $uninstallProcess = Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
+          if ($uninstallProcess.ExitCode -ne 0) { throw "Uninstaller exited with $($uninstallProcess.ExitCode)" }
+          if (Test-Path $installedExe) { throw "Uninstall did not remove the application" }
+          if (-not (Test-Path $historyFile)) { throw "Uninstall removed user history" }
+      - name: Upload Windows release files
+        uses: actions/upload-artifact@v4
+        with:
+          name: FileForge-Windows-Release
+          path: dist/release
