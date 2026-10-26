@@ -32,15 +32,28 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: '3.11'}
       - run: pip install '.[dev]'
-      - run: pyinstaller --noconfirm --windowed --name FileForge fileforge/app.py
+      - run: pyinstaller --noconfirm --windowed --icon installer\\FileForge.ico --name FileForge fileforge/app.py
       - run: dist\\FileForge\\FileForge.exe --version
-      - name: Upload Windows bundle
-        id: windows_artifact
-        continue-on-error: true
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress --yes
+      - name: Build installer
+        run: iscc installer\\FileForge.iss
+      - name: Create portable archive and checksums
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/release | Out-Null
+          Compress-Archive -Path dist/FileForge -DestinationPath dist/release/FileForge-Portable-1.0.0.zip -Force
+          Get-FileHash dist/release/FileForge-Setup-1.0.0.exe -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  FileForge-Setup-1.0.0.exe" } | Set-Content dist/release/SHA256SUMS.txt
+          Get-FileHash dist/release/FileForge-Portable-1.0.0.zip -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  FileForge-Portable-1.0.0.zip" } | Add-Content dist/release/SHA256SUMS.txt
+      - name: Verify installer and portable files
+        shell: pwsh
+        run: |
+          if (-not (Test-Path dist/release/FileForge-Setup-1.0.0.exe)) { throw "Installer was not produced" }
+          if (-not (Test-Path dist/release/FileForge-Portable-1.0.0.zip)) { throw "Portable archive was not produced" }
+          Expand-Archive -Path dist/release/FileForge-Portable-1.0.0.zip -DestinationPath portable-check -Force
+          if (-not (Test-Path portable-check/FileForge/FileForge.exe)) { throw "Portable archive is missing FileForge.exe" }
+      - name: Upload Windows release files
         uses: actions/upload-artifact@v4
         with:
-          name: FileForge-Windows
-          path: dist/FileForge
-      - name: Explain artifact quota blocker
-        if: steps.windows_artifact.outcome == 'failure'
-        run: echo "::warning::The Windows binary built and passed its smoke test, but GitHub Actions artifact storage is full. Free artifact storage and rerun CI before publishing a release."
+          name: FileForge-Windows-Release
+          path: dist/release

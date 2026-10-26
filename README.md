@@ -28,6 +28,10 @@ python -m pip install -e '.[dev]'
 fileforge
 ```
 
+## Windows releases
+
+The release page provides a portable ZIP and an unsigned installer. Run `FileForge-Setup-1.0.0.exe`, choose the optional desktop shortcut if wanted, and use the installer’s standard uninstall entry later. Application history is stored outside the installation directory and is retained by uninstall.
+
 ## Usage
 
 1. Add or drag files and folders into the inventory.
