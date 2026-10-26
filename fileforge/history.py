@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from .models import FileStamp, JournalEntry, PlannedChange
+from .transfer import move_no_replace
 
 
 def default_history_path() -> Path:
@@ -115,19 +116,19 @@ class History:
                 temporary = change.destination.with_name(
                     f".fileforge-undo-{uuid.uuid4().hex}.pending"
                 )
-                change.destination.rename(temporary)
+                move_no_replace(change.destination, temporary)
                 staged.append((temporary, change))
             for temporary, change in reversed(staged):
                 if change.source.exists():
                     raise FileExistsError(f"Original path became occupied: {change.source}")
-                temporary.rename(change.source)
+                move_no_replace(temporary, change.source)
                 completed.append(change)
         except OSError as exc:
             rollback_errors: list[str] = []
             for change in reversed(completed):
                 try:
                     if change.source.exists() and not change.destination.exists():
-                        change.source.rename(change.destination)
+                        move_no_replace(change.source, change.destination)
                 except OSError as rollback_exc:
                     rollback_errors.append(str(rollback_exc))
             completed_sources = {change.source for change in completed}
@@ -136,7 +137,7 @@ class History:
                     continue
                 try:
                     if temporary.exists() and not change.destination.exists():
-                        temporary.rename(change.destination)
+                        move_no_replace(temporary, change.destination)
                 except OSError as rollback_exc:
                     rollback_errors.append(str(rollback_exc))
             message = f"Undo failed and rollback was attempted: {exc}"

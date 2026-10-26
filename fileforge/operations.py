@@ -7,6 +7,7 @@ from pathlib import Path
 from .history import History
 from .models import OperationResult, PlannedChange
 from .rename import validate_plan
+from .transfer import move_no_replace
 
 
 class UnsafeOperation(RuntimeError):
@@ -42,14 +43,14 @@ def execute(
                 created_folders.add(parent)
         for change in changes:
             temporary = change.source.with_name(f".fileforge-{uuid.uuid4().hex}.pending")
-            change.source.rename(temporary)
+            move_no_replace(change.source, temporary)
             staged.append((temporary, change))
         for temporary, change in staged:
             if cancel and cancel.is_set():
                 raise OSError("Operation cancelled; rolling back")
             if change.destination.exists():
                 raise FileExistsError(f"Destination appeared during execution: {change.destination}")
-            temporary.rename(change.destination)
+            move_no_replace(temporary, change.destination)
             completed.append(change)
     except UnsafeOperation:
         raise
@@ -58,7 +59,7 @@ def execute(
         for change in reversed(completed):
             try:
                 if change.destination.exists() and not change.source.exists():
-                    change.destination.rename(change.source)
+                    move_no_replace(change.destination, change.source)
             except OSError as rollback_exc:
                 rollback_errors.append(str(rollback_exc))
         completed_sources = {change.source for change in completed}
@@ -67,7 +68,7 @@ def execute(
                 continue
             try:
                 if temporary.exists() and not change.source.exists():
-                    temporary.rename(change.source)
+                    move_no_replace(temporary, change.source)
             except OSError as rollback_exc:
                 rollback_errors.append(str(rollback_exc))
         detail = f"Operation failed and was rolled back: {exc}"
@@ -77,6 +78,11 @@ def execute(
             history.record(kind, changes, "failed", detail)
         raise UnsafeOperation(detail) from exc
     finally:
+        for folder in sorted(created_folders, key=lambda path: len(path.parts), reverse=True):
+            try:
+                folder.rmdir()
+            except OSError:
+                pass
         _operation_lock.release()
     if history:
         history.record(kind, completed)

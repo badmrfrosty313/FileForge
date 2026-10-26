@@ -104,18 +104,33 @@ def test_mid_operation_failure_rolls_back(tmp_path: Path, monkeypatch: pytest.Mo
     first.write_text("a")
     second.write_text("b")
     plan = plan_renames([first, second], RenameRules(prefix="x"))
-    original_rename = Path.rename
+    from fileforge import operations
+
+    original_move = operations.move_no_replace
     calls = 0
 
-    def flaky_rename(path: Path, target: Path) -> Path:
+    def flaky_move(path: Path, target: Path) -> None:
         nonlocal calls
         calls += 1
         if calls == 3:
             raise PermissionError("simulated locked destination")
-        return original_rename(path, target)
+        original_move(path, target)
 
-    monkeypatch.setattr(Path, "rename", flaky_rename)
+    monkeypatch.setattr(operations, "move_no_replace", flaky_move)
     with pytest.raises(UnsafeOperation, match="rolled back"):
         execute(plan)
     assert first.read_text() == "a"
     assert second.read_text() == "b"
+
+
+def test_no_replace_transfer_preserves_existing_file(tmp_path: Path) -> None:
+    from fileforge.transfer import move_no_replace
+
+    source = tmp_path / "source.txt"
+    destination = tmp_path / "destination.txt"
+    source.write_text("source")
+    destination.write_text("destination")
+    with pytest.raises(FileExistsError):
+        move_no_replace(source, destination)
+    assert source.read_text() == "source"
+    assert destination.read_text() == "destination"
