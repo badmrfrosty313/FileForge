@@ -10,4 +10,4 @@ Create an organization plan using extensions (`PDF`, `JPG`, and so on) or catego
 
 ## Investigate duplicates
 
-Scan a selected set. Candidates are grouped by size first and then by streamed SHA-256 hash. The operation is read-only; decide manually what to retain.
+Scan a selected set. Candidates are grouped by size first and then by streamed SHA-256 hash. Keep the preferred copy selected mentally, select only redundant copies, and move them to a dedicated quarantine folder. Verify the quarantine before removing anything manually.

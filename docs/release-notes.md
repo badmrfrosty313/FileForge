@@ -1,5 +1,7 @@
-# FileForge v0.1.0
+# FileForge 1.0.0 release notes
 
-Initial release with safety-first rename planning, cycle-safe execution, extension/category organization planning, duplicate hashing, operation journaling, undo checks, a dark desktop UI, packaging configuration, and cross-platform CI.
+FileForge 1.0 turns the initial safety engine into a complete desktop workflow. All four application areas are operational, lengthy scans and writes run outside the GUI thread, and file-changing operations use preview, confirmation, stale-state validation, journaling, and rollback.
 
-Known limitation: the v0.1 GUI exposes the rename workflow directly; the organization, duplicate, and history engine capabilities are ready for additional GUI panels in a subsequent release.
+Highlights include composable batch renaming, extension/category organization, recursive duplicate verification, recoverable quarantine, persistent selectable history, and cycle-safe undo. The Windows bundle is produced by the CI packaging job and smoke-tested with `--version` before upload.
+
+Native Windows behavior is validated by automated Windows CI; it has not been manually certified on physical Windows hardware in this development environment.
