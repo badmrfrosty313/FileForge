@@ -8,7 +8,7 @@ import threading
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, QThread, Signal
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtGui import QAction, QColor, QIcon, QKeySequence, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -47,6 +47,22 @@ def human_size(size: int) -> str:
             return f"{value:.1f} {unit}" if unit != "B" else f"{size} B"
         value /= 1024
     return f"{size} B"
+
+
+def application_icon() -> QIcon:
+    pixmap = QPixmap(64, 64)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setBrush(QColor("#397ce8"))
+    painter.setPen(Qt.NoPen)
+    painter.drawRoundedRect(4, 8, 56, 48, 10, 10)
+    painter.setBrush(QColor("#e8ecf3"))
+    painter.drawRect(15, 20, 34, 5)
+    painter.drawRect(15, 31, 25, 5)
+    painter.drawRect(15, 42, 31, 5)
+    painter.end()
+    return QIcon(pixmap)
 
 
 class FileTable(QTableWidget):
@@ -132,6 +148,7 @@ class FileForgeWindow(QMainWindow):
         self.duplicate_groups: list[DuplicateGroup] = []
         self.worker: QThread | None = None
         self.setWindowTitle("FileForge 1.0")
+        self.setWindowIcon(application_icon())
         self.resize(1180, 760)
         self.setAcceptDrops(True)
         self._build_ui()
@@ -170,6 +187,9 @@ class FileForgeWindow(QMainWindow):
         self.progress.setMaximumWidth(280)
         self.status = QLabel("Drop files or folders here to begin.")
         footer.addWidget(self.status, 1)
+        self.cancel_button = self._button("Cancel", self.cancel_worker, secondary=True)
+        self.cancel_button.setVisible(False)
+        footer.addWidget(self.cancel_button)
         footer.addWidget(self.progress)
         layout.addLayout(footer)
         self.setCentralWidget(root)
@@ -274,7 +294,9 @@ class FileForgeWindow(QMainWindow):
         layout = QVBoxLayout(widget)
         controls = QHBoxLayout()
         self.organize_mode = QComboBox()
-        self.organize_mode.addItems(["extension", "category"])
+        self.organize_mode.addItems(["extension", "category", "custom"])
+        self.custom_rules = QLineEdit()
+        self.custom_rules.setPlaceholderText("Custom: jpg=Photos; pdf=Documents")
         self.organize_destination = QLineEdit(str(self.settings.value("organize_destination", "")))
         controls.addWidget(QLabel("Mode"))
         controls.addWidget(self.organize_mode)
@@ -283,10 +305,12 @@ class FileForgeWindow(QMainWindow):
         controls.addWidget(self._button("Browse", self.choose_organize_destination, secondary=True))
         controls.addWidget(self._button("Preview", self.refresh_organize_preview, secondary=True))
         layout.addLayout(controls)
+        layout.addWidget(self.custom_rules)
         self.organize_preview = self._table(["Source", "Destination", "Status"])
         layout.addWidget(self.organize_preview)
         layout.addWidget(self._button("Move Files…", self.apply_organization))
         self.organize_mode.currentTextChanged.connect(self.refresh_organize_preview)
+        self.custom_rules.textChanged.connect(self.refresh_organize_preview)
         return widget
 
     def _duplicates_tab(self) -> QWidget:
@@ -297,6 +321,10 @@ class FileForgeWindow(QMainWindow):
         controls.addWidget(self._button("Cancel", self.cancel_worker, secondary=True))
         controls.addWidget(self._button("Open Containing Folder", self.open_selected_folder, secondary=True))
         controls.addWidget(self._button("Quarantine Selected…", self.quarantine_selected, secondary=True))
+        self.duplicate_filter = QLineEdit()
+        self.duplicate_filter.setPlaceholderText("Filter results")
+        self.duplicate_filter.textChanged.connect(self.filter_duplicates)
+        controls.addWidget(self.duplicate_filter)
         controls.addStretch()
         self.savings_label = QLabel("Potential savings: 0 B")
         controls.addWidget(self.savings_label)
@@ -417,7 +445,21 @@ class FileForgeWindow(QMainWindow):
         destination = self.organize_destination.text().strip()
         if not destination:
             return []
-        return plan_organization(self.paths, Path(destination), self.organize_mode.currentText())
+        rules: dict[str, str] = {}
+        if self.organize_mode.currentText() == "custom":
+            for part in self.custom_rules.text().split(";"):
+                if not part.strip():
+                    continue
+                if "=" not in part:
+                    raise ValueError(f"Custom rule must use extension=Folder: {part.strip()}")
+                extension, folder = part.split("=", 1)
+                rules[extension.strip()] = folder.strip()
+        return plan_organization(
+            self.paths,
+            Path(destination),
+            self.organize_mode.currentText(),
+            rules,
+        )
 
     def refresh_organize_preview(self) -> None:
         if not hasattr(self, "organize_preview"):
@@ -449,6 +491,7 @@ class FileForgeWindow(QMainWindow):
             return
         self.progress.setRange(0, 0)
         self.progress.setVisible(True)
+        self.cancel_button.setVisible(True)
         worker = OperationWorker(plan, self.history, kind)
         worker.completed.connect(self.operation_completed)
         worker.failed.connect(self.operation_failed)
@@ -471,6 +514,7 @@ class FileForgeWindow(QMainWindow):
 
     def worker_finished(self) -> None:
         self.progress.setVisible(False)
+        self.cancel_button.setVisible(False)
         self.worker = None
 
     def start_duplicate_scan(self) -> None:
@@ -480,6 +524,7 @@ class FileForgeWindow(QMainWindow):
             return
         self.progress.setRange(0, 0)
         self.progress.setVisible(True)
+        self.cancel_button.setVisible(True)
         worker = DuplicateWorker(roots)
         worker.progress.connect(self.duplicate_progress)
         worker.completed.connect(self.show_duplicate_results)
@@ -511,6 +556,19 @@ class FileForgeWindow(QMainWindow):
         savings = sum(group.recoverable_bytes for group in groups)
         self.savings_label.setText(f"Potential savings: {human_size(savings)}")
         self.status.setText(f"Found {len(groups)} duplicate group(s); no files were changed.")
+        self.filter_duplicates()
+
+    def filter_duplicates(self) -> None:
+        if not hasattr(self, "duplicate_filter"):
+            return
+        query = self.duplicate_filter.text().strip().lower()
+        for row in range(self.duplicates_table.rowCount()):
+            text = " ".join(
+                self.duplicates_table.item(row, column).text()
+                for column in range(self.duplicates_table.columnCount())
+                if self.duplicates_table.item(row, column)
+            ).lower()
+            self.duplicates_table.setRowHidden(row, bool(query) and query not in text)
 
     def cancel_worker(self) -> None:
         if hasattr(self.worker, "cancel"):
@@ -592,6 +650,7 @@ def main() -> int:
     parser.parse_args()
     app = QApplication(sys.argv)
     app.setApplicationName("FileForge")
+    app.setWindowIcon(application_icon())
     window = FileForgeWindow()
     window.show()
     return app.exec()

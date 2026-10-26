@@ -7,7 +7,7 @@ FileForge is a Windows-first desktop utility for safe batch renaming, organizati
 - Dark, scalable PySide6 interface with sortable tables, real drag-and-drop, keyboard shortcuts, context menus, progress, and persistent preferences.
 - Live batch rename previews with find/replace, prefix/suffix, padded numbering, case conversion, and extension filters.
 - Collision, invalid-name, Windows reserved-name, and changed-since-preview detection.
-- Extension, category, and engine-level custom organization rules with destination previews.
+- Extension, category, and custom organization rules with destination previews.
 - Recursive, symlink-safe duplicate scanning with size grouping, streamed SHA-256 verification, potential-savings totals, and recoverable quarantine.
 - Persistent operation history with status, details, selectable undo, and cycle-safe rollback.
 - Threaded hashing and filesystem operations keep the interface responsive.

@@ -10,7 +10,7 @@ Combine find/replace, prefix, suffix, case conversion, extension filtering, and 
 
 ## Organize
 
-Choose extension or broad category grouping, select a destination, and preview every move. The engine also supports custom extension-to-folder rules for integrations. New folders are created only after confirmation.
+Choose extension, broad category, or custom grouping; select a destination; and preview every move. Custom rules use `extension=Folder` pairs separated by semicolons, such as `jpg=Photos; pdf=Documents`. New folders are created only after confirmation.
 
 ## Duplicates and quarantine
 
