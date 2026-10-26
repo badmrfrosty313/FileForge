@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import os
+import threading
 import uuid
 from pathlib import Path
 
@@ -13,26 +13,71 @@ class UnsafeOperation(RuntimeError):
     pass
 
 
-def execute(changes: list[PlannedChange], history: History | None = None, kind: str = "rename") -> OperationResult:
-    # Folder creation is limited to planned destinations and happens only after confirmation.
-    for change in changes:
-        change.destination.parent.mkdir(parents=True, exist_ok=True)
-    errors = validate_plan(changes)
-    if errors:
-        raise UnsafeOperation("\n".join(errors))
+_operation_lock = threading.Lock()
+
+
+def execute(
+    changes: list[PlannedChange],
+    history: History | None = None,
+    kind: str = "rename",
+    cancel: threading.Event | None = None,
+) -> OperationResult:
+    if not changes:
+        raise UnsafeOperation("The plan contains no changes.")
+    if not _operation_lock.acquire(blocking=False):
+        raise UnsafeOperation("Another filesystem operation is already running.")
     staged: list[tuple[Path, PlannedChange]] = []
     completed: list[PlannedChange] = []
+    created_folders: set[Path] = set()
     try:
+        errors = validate_plan(changes)
+        if errors:
+            raise UnsafeOperation("\n".join(errors))
         for change in changes:
-            temporary = change.source.with_name(f".fileforge-{uuid.uuid4().hex}")
-            os.replace(change.source, temporary)
+            if cancel and cancel.is_set():
+                raise UnsafeOperation("Operation cancelled before files were changed.")
+            parent = change.destination.parent
+            if not parent.exists():
+                parent.mkdir(parents=True, exist_ok=True)
+                created_folders.add(parent)
+        for change in changes:
+            temporary = change.source.with_name(f".fileforge-{uuid.uuid4().hex}.pending")
+            change.source.rename(temporary)
             staged.append((temporary, change))
         for temporary, change in staged:
-            os.replace(temporary, change.destination)
+            if cancel and cancel.is_set():
+                raise OSError("Operation cancelled; rolling back")
+            if change.destination.exists():
+                raise FileExistsError(f"Destination appeared during execution: {change.destination}")
+            temporary.rename(change.destination)
             completed.append(change)
+    except UnsafeOperation:
+        raise
     except OSError as exc:
-        # Keep a precise result. Staged files remain recoverable and are reported, never overwritten.
-        raise UnsafeOperation(f"Operation stopped after {len(completed)} changes: {exc}") from exc
-    if history and completed:
+        rollback_errors: list[str] = []
+        for change in reversed(completed):
+            try:
+                if change.destination.exists() and not change.source.exists():
+                    change.destination.rename(change.source)
+            except OSError as rollback_exc:
+                rollback_errors.append(str(rollback_exc))
+        completed_sources = {change.source for change in completed}
+        for temporary, change in reversed(staged):
+            if change.source in completed_sources:
+                continue
+            try:
+                if temporary.exists() and not change.source.exists():
+                    temporary.rename(change.source)
+            except OSError as rollback_exc:
+                rollback_errors.append(str(rollback_exc))
+        detail = f"Operation failed and was rolled back: {exc}"
+        if rollback_errors:
+            detail += f"; rollback needs attention: {'; '.join(rollback_errors)}"
+        if history:
+            history.record(kind, changes, "failed", detail)
+        raise UnsafeOperation(detail) from exc
+    finally:
+        _operation_lock.release()
+    if history:
         history.record(kind, completed)
-    return OperationResult(completed, [])
+    return OperationResult(completed)

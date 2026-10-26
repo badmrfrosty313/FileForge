@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -26,21 +26,32 @@ class PlannedChange:
 @dataclass
 class OperationResult:
     completed: list[PlannedChange]
-    failures: list[str]
+    failures: list[str] = field(default_factory=list)
+    rolled_back: bool = False
 
 
 @dataclass
 class JournalEntry:
-    kind: Literal["rename", "organize"]
+    id: str
+    kind: Literal["rename", "organize", "quarantine"]
     changes: list[PlannedChange]
     created_at: str
+    status: Literal["completed", "undone", "failed"] = "completed"
+    message: str = ""
 
     def to_dict(self) -> dict:
         return {
+            "id": self.id,
             "kind": self.kind,
             "created_at": self.created_at,
+            "status": self.status,
+            "message": self.message,
             "changes": [
-                {"source": str(c.source), "destination": str(c.destination), "stamp": asdict(c.stamp)}
-                for c in self.changes
+                {
+                    "source": str(change.source),
+                    "destination": str(change.destination),
+                    "stamp": asdict(change.stamp),
+                }
+                for change in self.changes
             ],
         }

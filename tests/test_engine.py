@@ -41,7 +41,8 @@ def test_collision_and_changed_preview_rejected(tmp_path: Path) -> None:
     write(tmp_path / "b.txt")
     plan = plan_renames([a], RenameRules(find="a", replace="b"))
     assert validate_plan(plan)
-    plan = plan_renames([a], RenameRules(prefix="x")); a.write_bytes(b"changed")
+    plan = plan_renames([a], RenameRules(prefix="x"))
+    a.write_bytes(b"changed")
     with pytest.raises(UnsafeOperation):
         execute(plan)
 
