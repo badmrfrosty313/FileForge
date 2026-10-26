@@ -52,6 +52,23 @@ jobs:
           if (-not (Test-Path dist/release/FileForge-Portable-1.0.0.zip)) { throw "Portable archive was not produced" }
           Expand-Archive -Path dist/release/FileForge-Portable-1.0.0.zip -DestinationPath portable-check -Force
           if (-not (Test-Path portable-check/FileForge/FileForge.exe)) { throw "Portable archive is missing FileForge.exe" }
+      - name: Test installer, startup, and uninstall preservation
+        shell: pwsh
+        run: |
+          $historyDir = Join-Path $env:LOCALAPPDATA "FileForge"
+          New-Item -ItemType Directory -Force -Path $historyDir | Out-Null
+          $historyFile = Join-Path $historyDir "history.json"
+          Set-Content -Path $historyFile -Value '{"releaseVerification":true}'
+          Start-Process -FilePath dist/release/FileForge-Setup-1.0.0.exe -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait
+          $installedExe = Join-Path $env:LOCALAPPDATA "Programs\FileForge\FileForge.exe"
+          if (-not (Test-Path $installedExe)) { throw "Installer did not create FileForge.exe" }
+          & $installedExe --version
+          if ($LASTEXITCODE -ne 0) { throw "Installed application smoke test failed" }
+          $uninstaller = Join-Path $env:LOCALAPPDATA "Programs\FileForge\unins000.exe"
+          if (-not (Test-Path $uninstaller)) { throw "Uninstaller was not created" }
+          Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait
+          if (Test-Path $installedExe) { throw "Uninstall did not remove the application" }
+          if (-not (Test-Path $historyFile)) { throw "Uninstall removed user history" }
       - name: Upload Windows release files
         uses: actions/upload-artifact@v4
         with:
